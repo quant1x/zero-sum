@@ -204,7 +204,7 @@ func EstimateInitial(points [3]Point) PhysicsParams {
 	p2 := points[1] // 使用中间点
 
 	// 简单估算：假设θ=45°，g=9.8
-	theta_est := math.Pi / 4  // 45度
+	theta_est := math.Pi / 4 // 45度
 	g_est := 9.8
 
 	// 从 y = x*tanθ - (g*x²)/(2*v₀²*cos²θ) 估算 v₀
