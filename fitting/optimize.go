@@ -1,39 +1,49 @@
-package main
+// Package fitting 提供非线性优化算法，使用Levenberg-Marquardt方法反推抛物线物理参数。
+package fitting
 
 import (
+	"errors"
 	"fmt"
 	"gonum.org/v1/gonum/mat"
 	"log"
 	"math"
 )
 
-type Point struct{ X, Y float64 }
+// Point 表示二维点。
+type Point struct {
+	X, Y float64
+}
 
+// ProjectileSolver 抛物线参数求解器。
 type ProjectileSolver struct {
-	Points  [3]Point
-	Tol     float64
-	MaxIter int
+	Points  [3]Point // 三个观测点
+	Tol     float64  // 收敛容差
+	MaxIter int      // 最大迭代次数
 }
 
+// PhysicsParams 物理参数。
 type PhysicsParams struct {
-	V0, Theta, G float64
+	V0    float64 // 初速度
+	Theta float64 // 抛射角（弧度）
+	G     float64 // 重力加速度
 }
 
+// Solve 求解抛物线参数。
 func (s *ProjectileSolver) Solve() (PhysicsParams, error) {
-	a, b, _, ok := fitParabola(s.Points)
+	a, b, _, ok := s.fitParabola()
 	if !ok {
-		return PhysicsParams{}, fmt.Errorf("三点不构成抛物线")
+		return PhysicsParams{}, errors.New("三点不构成抛物线")
 	}
 
 	initial := s.estimateFromParabola(a, b)
 	return s.refineWithLM(initial)
 }
 
-// 三点抛物线拟合 y = ax² + bx + c
-func fitParabola(points [3]Point) (a, b, c float64, ok bool) {
-	x1, y1 := points[0].X, points[0].Y
-	x2, y2 := points[1].X, points[1].Y
-	x3, y3 := points[2].X, points[2].Y
+// fitParabola 三点抛物线拟合 y = ax² + bx + c
+func (s *ProjectileSolver) fitParabola() (a, b, c float64, ok bool) {
+	x1, y1 := s.Points[0].X, s.Points[0].Y
+	x2, y2 := s.Points[1].X, s.Points[1].Y
+	x3, y3 := s.Points[2].X, s.Points[2].Y
 
 	A := mat.NewDense(3, 3, []float64{
 		x1 * x1, x1, 1,
@@ -47,7 +57,6 @@ func fitParabola(points [3]Point) (a, b, c float64, ok bool) {
 		return 0, 0, 0, false
 	}
 
-	// Determine the rank of the A matrix with a near zero condition threshold.
 	const rcond = 1e-15
 	rank := svd.Rank(rcond)
 	if rank == 0 {
@@ -59,11 +68,10 @@ func fitParabola(points [3]Point) (a, b, c float64, ok bool) {
 	return x.AtVec(0), x.AtVec(1), x.AtVec(2), true
 }
 
-// 从抛物线参数估计物理参数
+// estimateFromParabola 从抛物线参数估计物理参数
 func (s *ProjectileSolver) estimateFromParabola(a, b float64) PhysicsParams {
 	theta := math.Atan(b)
 	cos := math.Cos(theta)
-	//sin := math.Sin(theta)
 
 	// 使用射程公式估算初速度
 	maxX := s.findMaxX()
@@ -79,7 +87,7 @@ func (s *ProjectileSolver) estimateFromParabola(a, b float64) PhysicsParams {
 	}
 }
 
-// 带阻尼的最小二乘优化（Levenberg-Marquardt）
+// refineWithLM 带阻尼的最小二乘优化（Levenberg-Marquardt）
 func (s *ProjectileSolver) refineWithLM(initial PhysicsParams) (PhysicsParams, error) {
 	p := initial
 	lambda := 0.1
@@ -89,7 +97,6 @@ func (s *ProjectileSolver) refineWithLM(initial PhysicsParams) (PhysicsParams, e
 	for iter := 0; iter < s.MaxIter; iter++ {
 		res := s.residuals(p)
 		J := s.numericalJacobian(p)
-		//currentErr := norm(res)
 
 		// 构建线性系统 (J^T J + λI)Δ = J^T r
 		var JTJ mat.Dense
@@ -121,15 +128,15 @@ func (s *ProjectileSolver) refineWithLM(initial PhysicsParams) (PhysicsParams, e
 
 		// 计算新残差
 		newRes := s.residuals(trial)
-		newErr := norm(newRes)
+		newNorm := mat.Norm(mat.NewVecDense(len(newRes), newRes), 2)
 
-		if newErr < prevErr { // 接受更新
+		if newNorm < prevErr { // 接受更新
 			p = trial
-			prevErr = newErr
+			prevErr = newNorm
 			lambda /= adjustFactor
 			adjustFactor = math.Max(adjustFactor*0.9, 1.1)
 
-			if newErr < s.Tol {
+			if newNorm < s.Tol {
 				return p, nil
 			}
 		} else { // 拒绝更新
@@ -140,7 +147,7 @@ func (s *ProjectileSolver) refineWithLM(initial PhysicsParams) (PhysicsParams, e
 	return p, fmt.Errorf("超过最大迭代次数")
 }
 
-// 数值方法计算雅可比矩阵
+// numericalJacobian 数值方法计算雅可比矩阵
 func (s *ProjectileSolver) numericalJacobian(p PhysicsParams) *mat.Dense {
 	epsilon := 1e-8
 	res0 := s.residuals(p)
@@ -167,7 +174,7 @@ func (s *ProjectileSolver) numericalJacobian(p PhysicsParams) *mat.Dense {
 	return J
 }
 
-// 计算残差向量
+// residuals 计算残差向量
 func (s *ProjectileSolver) residuals(p PhysicsParams) []float64 {
 	res := make([]float64, 3)
 	for i, pt := range s.Points {
@@ -178,7 +185,7 @@ func (s *ProjectileSolver) residuals(p PhysicsParams) []float64 {
 	return res
 }
 
-// 矩阵对角线增强
+// addDiagonal 矩阵对角线增强
 func addDiagonal(m *mat.Dense, lambda float64) {
 	r, c := m.Dims()
 	for i := 0; i < r; i++ {
@@ -190,7 +197,7 @@ func addDiagonal(m *mat.Dense, lambda float64) {
 	}
 }
 
-// 求解线性方程组（使用QR分解）
+// solveLinearSystem 求解线性方程组（使用QR分解）
 func solveLinearSystem(A *mat.Dense, b *mat.VecDense) (*mat.Dense, bool) {
 	var qr mat.QR
 	qr.Factorize(A)
@@ -202,7 +209,7 @@ func solveLinearSystem(A *mat.Dense, b *mat.VecDense) (*mat.Dense, bool) {
 	return &x, true
 }
 
-// 辅助函数
+// findMaxX 辅助函数
 func (s *ProjectileSolver) findMaxX() float64 {
 	max := 0.0
 	for _, p := range s.Points {
@@ -213,44 +220,6 @@ func (s *ProjectileSolver) findMaxX() float64 {
 	return max
 }
 
-func norm(v []float64) float64 {
-	sum := 0.0
-	for _, x := range v {
-		sum += x * x
-	}
-	return math.Sqrt(sum)
-}
-
 func clamp(value, min, max float64) float64 {
 	return math.Max(min, math.Min(value, max))
-}
-
-func main() {
-	// 测试案例：完美抛物线（初速度20m/s, 45度, g=9.81）
-	points := [3]Point{
-		{X: 5.0, Y: 5.0*1 - 9.81*5*5/(2*20*20*0.5)},     // 理论点1
-		{X: 10.0, Y: 10.0*1 - 9.81*10*10/(2*20*20*0.5)}, // 顶点
-		{X: 15.0, Y: 15.0*1 - 9.81*15*15/(2*20*20*0.5)}, // 理论点2
-	}
-
-	points = [3]Point{
-		{X: 1, Y: 6.18},
-		{X: 2, Y: 6.32},
-		{X: 3, Y: 6.09},
-	}
-
-	solver := ProjectileSolver{
-		Points:  points,
-		Tol:     1e-6,
-		MaxIter: 1000,
-	}
-
-	result, err := solver.Solve()
-	if err != nil {
-		fmt.Println("求解失败:", err)
-	}
-	fmt.Printf("反推成功:\n")
-	fmt.Printf("初速度: %.2f m/s\n", result.V0)
-	fmt.Printf("抛射角: %.2f°\n", result.Theta*180/math.Pi)
-	fmt.Printf("重力加速度: %.2f m/s²\n", result.G)
 }

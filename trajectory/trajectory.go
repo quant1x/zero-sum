@@ -1,14 +1,16 @@
-package main
+// Package trajectory 提供抛物线轨迹参数优化，使用Levenberg-Marquardt算法反推物理参数。
+package trajectory
 
 import (
-	"fmt"
+	"errors"
 	"math"
 )
 
+// Point 表示具有 X 和 Y 坐标的二维点。
 type Point struct{ X, Y float64 }
 
-// 目标函数（残差）
-func residuals(params []float64, points []Point, res []float64) {
+// Residuals 计算目标函数残差（抛物线模型）。
+func Residuals(params []float64, points []Point, res []float64) {
 	theta, v0, g := params[0], params[1], params[2]
 	cosTheta := math.Cos(theta)
 	if cosTheta < 1e-9 {
@@ -20,8 +22,8 @@ func residuals(params []float64, points []Point, res []float64) {
 	}
 }
 
-// 雅可比矩阵计算
-func jacobian(params []float64, points []Point, jac [][]float64) {
+// Jacobian 计算雅可比矩阵。
+func Jacobian(params []float64, points []Point, jac [][]float64) {
 	theta, v0, g := params[0], params[1], params[2]
 	cosTheta := math.Cos(theta)
 	sinTheta := math.Sin(theta)
@@ -44,13 +46,17 @@ func jacobian(params []float64, points []Point, jac [][]float64) {
 	}
 }
 
-// LM算法实现
-func optimizeLM(points []Point, initialParams []float64, maxIter int, tol float64) ([]float64, error) {
+// OptimizeLM 使用LM算法优化抛物线参数。
+// 输入：点集、初始参数、最大迭代次数、收敛容差。
+// 输出：优化后的参数 [θ, v0, g] 和错误。
+func OptimizeLM(points []Point, initialParams []float64, maxIter int, tol float64) ([]float64, error) {
+	if len(points) < 3 {
+		return nil, errors.New("需要至少3个点")
+	}
 	params := make([]float64, len(initialParams))
 	copy(params, initialParams)
 
 	lambda := 0.01
-	diag := make([]float64, 3)
 	res := make([]float64, len(points))
 	jac := make([][]float64, len(points))
 	for i := range jac {
@@ -58,8 +64,8 @@ func optimizeLM(points []Point, initialParams []float64, maxIter int, tol float6
 	}
 
 	for iter := 0; iter < maxIter; iter++ {
-		residuals(params, points, res)
-		jacobian(params, points, jac)
+		Residuals(params, points, res)
+		Jacobian(params, points, jac)
 
 		// 构造正规方程
 		JTJ := make([][]float64, 3)
@@ -82,13 +88,14 @@ func optimizeLM(points []Point, initialParams []float64, maxIter int, tol float6
 
 		// 添加LM阻尼项
 		for i := 0; i < 3; i++ {
-			diag[i] = JTJ[i][i]
 			JTJ[i][i] += lambda
 		}
 
 		// 求解增量方程
 		delta := make([]float64, 3)
-		solve3x3(JTJ, JTr, delta)
+		if err := solve3x3(JTJ, JTr, delta); err != nil {
+			return nil, err
+		}
 
 		// 尝试更新参数
 		newParams := make([]float64, 3)
@@ -97,9 +104,14 @@ func optimizeLM(points []Point, initialParams []float64, maxIter int, tol float6
 			newParams[i] -= delta[i] // 注意符号
 		}
 
+		// 物理约束
+		newParams[0] = math.Max(1e-5, math.Min(newParams[0], math.Pi/2-1e-5)) // θ
+		newParams[1] = math.Max(0.1, newParams[1])                           // v0
+		newParams[2] = math.Max(0.1, newParams[2])                           // g
+
 		// 计算残差变化
 		newRes := make([]float64, len(points))
-		residuals(newParams, points, newRes)
+		Residuals(newParams, points, newRes)
 		oldNorm := norm(res)
 		newNorm := norm(newRes)
 
@@ -118,9 +130,52 @@ func optimizeLM(points []Point, initialParams []float64, maxIter int, tol float6
 	return params, nil
 }
 
-func solve3x3(A [][]float64, b []float64, x []float64) {
-	// 高斯消去法实现（同前）
-	// 此处省略具体实现...
+// solve3x3 高斯消元法解3x3线性方程组。
+func solve3x3(A [][]float64, b []float64, x []float64) error {
+	// 增广矩阵
+	aug := make([][]float64, 3)
+	for i := 0; i < 3; i++ {
+		aug[i] = make([]float64, 4)
+		copy(aug[i][:3], A[i])
+		aug[i][3] = b[i]
+	}
+
+	// 高斯消元
+	for col := 0; col < 3; col++ {
+		// 选主元
+		maxRow := col
+		for r := col; r < 3; r++ {
+			if math.Abs(aug[r][col]) > math.Abs(aug[maxRow][col]) {
+				maxRow = r
+			}
+		}
+		aug[col], aug[maxRow] = aug[maxRow], aug[col]
+
+		pivot := aug[col][col]
+		if math.Abs(pivot) < 1e-12 {
+			return errors.New("矩阵奇异")
+		}
+
+		// 归一化
+		for j := col; j < 4; j++ {
+			aug[col][j] /= pivot
+		}
+
+		// 消元
+		for r := 0; r < 3; r++ {
+			if r != col {
+				factor := aug[r][col]
+				for j := col; j < 4; j++ {
+					aug[r][j] -= factor * aug[col][j]
+				}
+			}
+		}
+	}
+
+	for i := 0; i < 3; i++ {
+		x[i] = aug[i][3]
+	}
+	return nil
 }
 
 func norm(v []float64) float64 {
@@ -129,30 +184,4 @@ func norm(v []float64) float64 {
 		sum += val * val
 	}
 	return math.Sqrt(sum)
-}
-
-func main() {
-	points := []Point{
-		{1, 1},
-		{2, 2},
-		{3, 0},
-	}
-	points = []Point{
-		{X: 1, Y: 6.18},
-		{X: 2, Y: 6.32},
-		{X: 3, Y: 6.09},
-	}
-
-	initialParams := []float64{
-		math.Atan(1.5), // 初始角度
-		5.0,            // 初始速度
-		9.8,            // 初始重力
-	}
-
-	params, _ := optimizeLM(points, initialParams, 100, 1e-6)
-	theta, v0, g := params[0], params[1], params[2]
-
-	fmt.Printf("角度: %.2f°\n", theta*180/math.Pi)
-	fmt.Printf("初速度: %.2f m/s\n", v0)
-	fmt.Printf("重力加速度: %.2f m/s²\n", g)
 }

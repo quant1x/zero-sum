@@ -1,23 +1,31 @@
-package main
+// Package estimation 提供参数估计算法，使用Levenberg-Marquardt方法反推抛物线物理参数。
+package estimation
 
 import (
-	"fmt"
+	"errors"
 	"math"
 )
 
-type Point struct{ X, Y float64 }
+// Point 表示二维点。
+type Point struct {
+	X, Y float64
+}
 
+// ProjectileSolver 抛物线参数求解器。
 type ProjectileSolver struct {
-	Points  [3]Point
-	Tol     float64
-	MaxIter int
+	Points  [3]Point // 三个观测点
+	Tol     float64  // 收敛容差
+	MaxIter int      // 最大迭代次数
 }
 
+// PhysicsParams 物理参数。
 type PhysicsParams struct {
-	V0, Theta, G float64
+	V0    float64 // 初速度
+	Theta float64 // 抛射角（弧度）
+	G     float64 // 重力加速度
 }
 
-// 改进的求解方法（Levenberg-Marquardt 算法）
+// Solve 执行LM算法求解参数。
 func (s *ProjectileSolver) Solve(initial PhysicsParams) (PhysicsParams, error) {
 	p := initial
 	lambda := 1e-3 // 阻尼系数
@@ -35,7 +43,7 @@ func (s *ProjectileSolver) Solve(initial PhysicsParams) (PhysicsParams, error) {
 
 		delta, ok := solveLinearSystem(JTJ, JTF)
 		if !ok {
-			return p, fmt.Errorf("矩阵奇异")
+			return p, errors.New("矩阵奇异")
 		}
 
 		// 临时更新参数
@@ -68,10 +76,10 @@ func (s *ProjectileSolver) Solve(initial PhysicsParams) (PhysicsParams, error) {
 			return p, nil
 		}
 	}
-	return p, fmt.Errorf("超过最大迭代次数")
+	return p, errors.New("超过最大迭代次数")
 }
 
-// 计算残差向量
+// residuals 计算残差向量。
 func (s *ProjectileSolver) residuals(p PhysicsParams) [3]float64 {
 	var F [3]float64
 	for i, pt := range s.Points {
@@ -81,7 +89,7 @@ func (s *ProjectileSolver) residuals(p PhysicsParams) [3]float64 {
 	return F
 }
 
-// 计算雅可比矩阵（数值微分法）
+// jacobian 计算雅可比矩阵（数值微分法）。
 func (s *ProjectileSolver) jacobian(p PhysicsParams) ([3][3]float64, [3]float64) {
 	epsilon := 1e-6
 	F := s.residuals(p)
@@ -107,7 +115,7 @@ func (s *ProjectileSolver) jacobian(p PhysicsParams) ([3][3]float64, [3]float64)
 	return J, F
 }
 
-// 矩阵运算工具函数
+// multiplyTransposed 计算A^T * B。
 func multiplyTransposed(A [3][3]float64, B [3][3]float64) [3][3]float64 {
 	var result [3][3]float64
 	for i := 0; i < 3; i++ {
@@ -122,6 +130,7 @@ func multiplyTransposed(A [3][3]float64, B [3][3]float64) [3][3]float64 {
 	return result
 }
 
+// multiplyTransposedVec 计算A^T * v。
 func multiplyTransposedVec(A [3][3]float64, v [3]float64) [3]float64 {
 	var result [3]float64
 	for i := 0; i < 3; i++ {
@@ -134,40 +143,7 @@ func multiplyTransposedVec(A [3][3]float64, v [3]float64) [3]float64 {
 	return result
 }
 
-func v1solveLinearSystem(A [3][3]float64, b [3]float64) ([3]float64, bool) {
-	// 此处使用高斯消元法（实际应用建议使用优化库）
-	// 此处简化为调用前文实现的 solveLinearSystem 函数
-	// 可替换为更稳健的线性代数库实现
-	return [3]float64{}, true
-}
-
-func norm(v [3]float64) float64 {
-	return math.Sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2])
-}
-
-// 自动估算初始值
-func estimateInitial(points [3]Point) PhysicsParams {
-	// 基于抛物线顶点估算
-	x1, y1 := points[0].X, points[0].Y
-	x2, y2 := points[1].X, points[1].Y
-	x3, y3 := points[2].X, points[2].Y
-
-	// 假设对称轴位于中间点
-	xVertex := (x1 + x3) / 2
-	gEstimate := 9.8 // 初始假设
-	v0Estimate := math.Sqrt((x3 * x3 * gEstimate) / (2 * (x3*math.Tan(math.Pi/4) - y3)))
-
-	_ = y1
-	_ = x2
-	_ = y2
-	_ = xVertex
-	return PhysicsParams{
-		V0:    v0Estimate,
-		Theta: math.Pi / 4,
-		G:     gEstimate,
-	}
-}
-
+// solveLinearSystem 解线性方程组（伴随矩阵法）。
 func solveLinearSystem(J [3][3]float64, F [3]float64) ([3]float64, bool) {
 	// 计算行列式
 	det := J[0][0]*(J[1][1]*J[2][2]-J[1][2]*J[2][1]) -
@@ -215,61 +191,40 @@ func solveLinearSystem(J [3][3]float64, F [3]float64) ([3]float64, bool) {
 	return delta, true
 }
 
-func main() {
-	// 生成测试数据（已知参数：v0=20m/s, θ=45°, g=9.81m/s²）
-	trueParams := PhysicsParams{
-		V0:    20,
-		Theta: math.Pi / 4,
-		G:     9.81,
+// norm 计算向量范数。
+func norm(v [3]float64) float64 {
+	return math.Sqrt(v[0]*v[0] + v[1]*v[1] + v[2]*v[2])
+}
+
+// EstimateInitial 自动估算初始值。
+func EstimateInitial(points [3]Point) PhysicsParams {
+	// 使用更稳定的初始值估算
+	// 基于抛物线公式估算参数
+
+	p2 := points[1] // 使用中间点
+
+	// 简单估算：假设θ=45°，g=9.8
+	theta_est := math.Pi / 4  // 45度
+	g_est := 9.8
+
+	// 从 y = x*tanθ - (g*x²)/(2*v₀²*cos²θ) 估算 v₀
+	// 使用中间点估算
+	x_mid := p2.X
+	y_mid := p2.Y
+	cos2 := math.Pow(math.Cos(theta_est), 2)
+	v0_est := math.Sqrt((g_est * x_mid * x_mid) / (2 * (x_mid*math.Tan(theta_est) - y_mid) * cos2))
+
+	// 确保正值
+	if v0_est <= 0 || math.IsNaN(v0_est) {
+		v0_est = 10.0 // 默认值
+	}
+	if g_est <= 0 {
+		g_est = 9.8
 	}
 
-	// 计算三个理论轨迹点
-	//points := [3]Point{
-	//	{X: 5, Y: 5*1 - 9.81*5*5/(2*20*20*0.5)},
-	//	{X: 10, Y: 10*1 - 9.81*10*10/(2*20*20*0.5)},
-	//	{X: 15, Y: 15*1 - 9.81*15*15/(2*20*20*0.5)},
-	//}
-	// 更合理的测试数据（三点不共线）
-	points := [3]Point{
-		{X: 2.0, Y: 5.0},
-		{X: 5.0, Y: 8.0},
-		{X: 8.0, Y: 5.0},
+	return PhysicsParams{
+		V0:    v0_est,
+		Theta: theta_est,
+		G:     g_est,
 	}
-
-	solver := ProjectileSolver{
-		Points:  points,
-		Tol:     1e-6,
-		MaxIter: 100,
-	}
-
-	// 初始猜测（带误差的猜测值）
-	//initial := PhysicsParams{
-	//	V0:    18,
-	//	Theta: math.Pi / 3.5,
-	//	G:     8.5,
-	//}
-
-	// 自动估算初始值
-	initial := estimateInitial(points)
-
-	// 执行求解
-	result, err := solver.Solve(initial)
-	if err != nil {
-		fmt.Println("求解失败:", err)
-		return
-	}
-
-	// 输出结果
-	fmt.Println("=== 真实参数 ===")
-	fmt.Printf("初速度: %.2f m/s\n", trueParams.V0)
-	fmt.Printf("抛射角: %.1f°\n", trueParams.Theta*180/math.Pi)
-	fmt.Printf("重力加速度: %.2f m/s²\n\n", trueParams.G)
-
-	fmt.Println("=== 反推结果 ===")
-	fmt.Printf("初速度: %.2f m/s (误差: %.2f%%)\n",
-		result.V0, 100*math.Abs((result.V0-trueParams.V0)/trueParams.V0))
-	fmt.Printf("抛射角: %.1f° (误差: %.2f%%)\n",
-		result.Theta*180/math.Pi, 100*math.Abs((result.Theta-trueParams.Theta)/trueParams.Theta))
-	fmt.Printf("重力加速度: %.2f m/s² (误差: %.2f%%)",
-		result.G, 100*math.Abs((result.G-trueParams.G)/trueParams.G))
 }
