@@ -3,10 +3,15 @@ All notable changes to this project will be documented in this file.
 
 ## [Unreleased]
 
+## [0.0.6] - 2025-09-24
+### Changed
+- 增加markdown文档末尾需要空白行
+
 ## [0.0.5] - 2025-09-24
 ### Changed
 - 整理归档实验性代码
 - 调整源文件格式
+- update changelog
 
 ## [0.0.4] - 2025-09-16
 ### Changed
@@ -28,7 +33,8 @@ All notable changes to this project will be documented in this file.
 - update changelog
 
 
-[Unreleased]: https://gitee.com/quant1x/zero-sum.git/compare/v0.0.5...HEAD
+[Unreleased]: https://gitee.com/quant1x/zero-sum.git/compare/v0.0.6...HEAD
+[0.0.6]: https://gitee.com/quant1x/zero-sum.git/compare/v0.0.5...v0.0.6
 [0.0.5]: https://gitee.com/quant1x/zero-sum.git/compare/v0.0.4...v0.0.5
 [0.0.4]: https://gitee.com/quant1x/zero-sum.git/compare/v0.0.3...v0.0.4
 [0.0.3]: https://gitee.com/quant1x/zero-sum.git/compare/v0.0.2...v0.0.3
